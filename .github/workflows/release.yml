@@ -55,7 +55,13 @@ jobs:
         run: |
           git clone --recurse-submodules \
             https://github.com/buresu/ndi-python.git /tmp/ndi-python
-          pip install /tmp/ndi-python
+          # The pinned pybind11 submodule is too old for modern CMake (< 3.5).
+          # Update it to a recent stable tag before building.
+          cd /tmp/ndi-python/lib/pybind11
+          git fetch --tags
+          git checkout v2.13.6
+          cd /tmp/ndi-python
+          pip install .
 
       # ------------------------------------------------------------------ #
       # 5. Remaining Python dependencies                                     #
