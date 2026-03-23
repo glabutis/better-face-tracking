@@ -21,16 +21,17 @@ logger = logging.getLogger(__name__)
 class CanonCamera:
     def __init__(self, ip: str, port: int = 80, user: str = "admin", password: str = "admin"):
         self.base_url = f"http://{ip}:{port}/cgi-bin/aw_ptz"
-        self._auth = HTTPDigestAuth(user, password)
         self._lock = threading.Lock()
         self.timeout = 1.0
+        self._session = requests.Session()
+        self._session.auth = HTTPDigestAuth(user, password)
 
     def _send(self, cmd: str) -> str | None:
         """Send a raw PTZ command string (without leading #). Thread-safe."""
         url = f"{self.base_url}?cmd=%23{cmd}&res=1"
         try:
             with self._lock:
-                resp = requests.get(url, auth=self._auth, timeout=self.timeout)
+                resp = self._session.get(url, timeout=self.timeout)
             resp.raise_for_status()
             return resp.text.strip()
         except requests.RequestException as exc:
