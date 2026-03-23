@@ -1,0 +1,156 @@
+name: Release — Build macOS DMG
+
+# Triggers on any tag that looks like a version: v1.0.0, v0.2.1-beta, etc.
+on:
+  push:
+    tags:
+      - 'v*'
+
+permissions:
+  contents: write   # needed to create GitHub Releases and upload assets
+
+jobs:
+  build-macos:
+    name: Build DMG (${{ matrix.arch }})
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - runner: macos-13   # Intel (x86_64)
+            arch:   x86_64
+          - runner: macos-14   # Apple Silicon (arm64)
+            arch:   arm64
+
+    runs-on: ${{ matrix.runner }}
+
+    steps:
+      # ------------------------------------------------------------------ #
+      # 1. Source                                                            #
+      # ------------------------------------------------------------------ #
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      # ------------------------------------------------------------------ #
+      # 2. Python                                                            #
+      # ------------------------------------------------------------------ #
+      - name: Set up Python 3.11
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+          cache: pip
+
+      # ------------------------------------------------------------------ #
+      # 3. Dependencies                                                      #
+      # ------------------------------------------------------------------ #
+      - name: Install Python dependencies
+        run: |
+          python -m pip install --upgrade pip
+          pip install -r requirements.txt
+          pip install pyinstaller pillow
+
+      # ------------------------------------------------------------------ #
+      # 4. Generate app icon                                                 #
+      # ------------------------------------------------------------------ #
+      - name: Generate AppIcon.icns
+        run: python assets/generate_icon.py
+
+      # ------------------------------------------------------------------ #
+      # 5. Build .app bundle with PyInstaller                               #
+      # ------------------------------------------------------------------ #
+      - name: Build app bundle
+        run: |
+          pyinstaller better-face-tracking.spec --clean --noconfirm
+          echo "--- dist contents ---"
+          ls -lh dist/
+
+      # ------------------------------------------------------------------ #
+      # 6. Ad-hoc code signing                                              #
+      #    (unsigned binaries cause Gatekeeper to block on first open;      #
+      #     ad-hoc signing lets users right-click → Open once to approve)   #
+      #                                                                      #
+      #    TO ADD REAL SIGNING later:                                        #
+      #      1. Add secrets: APPLE_CERTIFICATE (base64 p12),                #
+      #                      APPLE_CERTIFICATE_PASSWORD,                     #
+      #                      APPLE_TEAM_ID,                                  #
+      #                      APPLE_NOTARY_USER,                              #
+      #                      APPLE_NOTARY_PASSWORD                           #
+      #      2. Replace the codesign line below with:                        #
+      #           security import cert.p12 -k build.keychain -P ${{ secrets.APPLE_CERTIFICATE_PASSWORD }} #
+      #           codesign --deep --force --options runtime \                #
+      #             --sign "Developer ID Application: Your Name ($TEAM_ID)" \#
+      #             dist/BetterFaceTracking.app                              #
+      #      3. After DMG creation, add notarization:                        #
+      #           xcrun notarytool submit BetterFaceTracking-*.dmg \         #
+      #             --apple-id ${{ secrets.APPLE_NOTARY_USER }} \            #
+      #             --password ${{ secrets.APPLE_NOTARY_PASSWORD }} \        #
+      #             --team-id ${{ secrets.APPLE_TEAM_ID }} --wait            #
+      #           xcrun stapler staple BetterFaceTracking-*.dmg              #
+      # ------------------------------------------------------------------ #
+      - name: Ad-hoc code sign
+        run: |
+          codesign --deep --force --sign - dist/BetterFaceTracking.app
+          codesign --verify --verbose dist/BetterFaceTracking.app
+
+      # ------------------------------------------------------------------ #
+      # 7. Create DMG                                                        #
+      # ------------------------------------------------------------------ #
+      - name: Install create-dmg
+        run: brew install create-dmg
+
+      - name: Create DMG
+        env:
+          TAG: ${{ github.ref_name }}
+          ARCH: ${{ matrix.arch }}
+        run: |
+          DMG_NAME="BetterFaceTracking-${TAG}-${ARCH}.dmg"
+
+          create-dmg \
+            --volname "Better Face Tracking ${TAG}" \
+            --volicon "assets/AppIcon.icns" \
+            --window-pos 200 150 \
+            --window-size 620 420 \
+            --icon-size 120 \
+            --icon "BetterFaceTracking.app" 155 185 \
+            --hide-extension "BetterFaceTracking.app" \
+            --app-drop-link 465 185 \
+            --no-internet-enable \
+            "${DMG_NAME}" \
+            "dist/"
+
+          echo "DMG_NAME=${DMG_NAME}" >> "$GITHUB_ENV"
+          echo "--- DMG size ---"
+          ls -lh "${DMG_NAME}"
+
+      # ------------------------------------------------------------------ #
+      # 8. Upload artifact (available even if release step fails)           #
+      # ------------------------------------------------------------------ #
+      - name: Upload DMG artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: ${{ env.DMG_NAME }}
+          path: ${{ env.DMG_NAME }}
+          retention-days: 30
+
+      # ------------------------------------------------------------------ #
+      # 9. Attach to GitHub Release (creates the release if it doesn't exist)
+      # ------------------------------------------------------------------ #
+      - name: Publish to GitHub Release
+        uses: softprops/action-gh-release@v2
+        with:
+          tag_name: ${{ github.ref_name }}
+          name: "Better Face Tracking ${{ github.ref_name }}"
+          generate_release_notes: true
+          files: ${{ env.DMG_NAME }}
+          body: |
+            ## Installation
+
+            1. Download the DMG for your Mac:
+               - **Apple Silicon (M1/M2/M3):** `*-arm64.dmg`
+               - **Intel Mac:** `*-x86_64.dmg`
+            2. Open the DMG and drag **BetterFaceTracking** to Applications.
+            3. **First launch:** right-click the app → **Open** (required once because the app is not notarized yet).
+
+            ## Requirements
+            - macOS 12 (Monterey) or later
+            - [NDI Runtime](https://ndi.video/download-ndi-sdk/) installed for NDI video input
+            - Canon CR-N series PTZ camera on the same network

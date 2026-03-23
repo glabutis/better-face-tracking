@@ -1,0 +1,13 @@
+{
+  "camera_ip": "192.168.1.100",
+  "camera_user": "admin",
+  "camera_pass": "admin",
+  "camera_port": 80,
+  "ndi_source": "",
+  "pid_pan":  {"kp": 0.4, "ki": 0.0, "kd": 0.05},
+  "pid_tilt": {"kp": 0.4, "ki": 0.0, "kd": 0.05},
+  "deadzone": 0.03,
+  "max_speed": 30,
+  "detection_confidence": 0.6,
+  "frame_skip": 2
+}

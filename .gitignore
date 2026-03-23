@@ -1,0 +1,42 @@
+# Python
+__pycache__/
+*.py[cod]
+*.pyo
+*.pyd
+.Python
+*.egg-info/
+dist/
+build/
+.eggs/
+*.egg
+.venv/
+venv/
+env/
+
+# PyInstaller
+*.spec.bak
+dist/
+build/
+
+# macOS
+.DS_Store
+.AppleDouble
+.LSOverride
+._*
+.Spotlight-V100
+.Trashes
+*.dmg
+
+# Generated assets (rebuilt at build time)
+assets/AppIcon.icns
+assets/AppIcon.iconset/
+
+# Editor
+.idea/
+.vscode/
+*.swp
+*.swo
+
+# Runtime config (contains camera credentials — keep out of git)
+# NOTE: config.json IS committed because it contains safe defaults.
+# If you add real credentials, add config.json to this list.
