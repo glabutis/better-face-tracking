@@ -3,7 +3,7 @@
 Layout
 ------
   ┌─────────────────────────────────────────────────────────┐
-  │  [Camera IP ______] [Connect Camera]  [NDI Source ▼] [Connect NDI]  [⚙ Settings] │  ← toolbar
+  │  [Camera IP ______] [Connect Camera]  [RTSP URL ______] [Connect Stream]  [⚙ Settings] │  ← toolbar
   ├─────────────────────────────────────────────────────────┤
   │                                                         │
   │                   VIDEO FEED                            │
@@ -22,7 +22,6 @@ import numpy as np
 from PyQt6.QtCore import Qt, QTimer
 from PyQt6.QtGui import QAction, QColor, QPalette
 from PyQt6.QtWidgets import (
-    QComboBox,
     QHBoxLayout,
     QLabel,
     QLineEdit,
@@ -36,7 +35,7 @@ from PyQt6.QtWidgets import (
 
 from ..canon_api import CanonCamera
 from ..face_detector import FaceDetection, FaceDetector
-from ..ndi_receiver import NDIReceiver
+from ..rtsp_receiver import RTSPReceiver
 from ..pid import PID
 from ..tracker import FaceTracker
 from .settings_dialog import SettingsDialog
@@ -52,7 +51,7 @@ DEFAULT_CONFIG: dict = {
     "camera_user":          "admin",
     "camera_pass":          "admin",
     "camera_port":          80,
-    "ndi_source":           "",
+    "rtsp_url":             "",
     "pid_pan":              {"kp": 0.4, "ki": 0.0, "kd": 0.05},
     "pid_tilt":             {"kp": 0.4, "ki": 0.0, "kd": 0.05},
     "deadzone":             0.03,
@@ -167,7 +166,7 @@ class MainWindow(QMainWindow):
         self.pid_tilt = PID(**cfg["pid_tilt"])
         self.tracker  = FaceTracker()
 
-        self.ndi_receiver  = NDIReceiver(cfg.get("ndi_source", ""))
+        self.rtsp_receiver = RTSPReceiver(cfg.get("rtsp_url", ""))
         self.face_detector = FaceDetector(confidence=cfg.get("detection_confidence", 0.6))
 
         self.control_timer = QTimer()
@@ -206,7 +205,7 @@ class MainWindow(QMainWindow):
         self.status_bar = QStatusBar()
         self.status_bar.setStyleSheet("background:#1a1a1a; color:#888; font-size:11px;")
         self.setStatusBar(self.status_bar)
-        self.status_bar.showMessage("Ready — connect a camera and NDI source to begin")
+        self.status_bar.showMessage("Ready — connect a camera and RTSP stream to begin")
 
         self._build_menu()
 
@@ -241,30 +240,20 @@ class MainWindow(QMainWindow):
         _separator(layout)
         layout.addSpacing(16)
 
-        # ---- NDI section ---------------------------------------------- #
-        layout.addWidget(_label("NDI Source", _LABEL_STYLE))
+        # ---- RTSP section --------------------------------------------- #
+        layout.addWidget(_label("RTSP URL", _LABEL_STYLE))
 
-        self.ndi_combo = QComboBox()
-        self.ndi_combo.setEditable(True)
-        self.ndi_combo.setMinimumWidth(200)
-        self.ndi_combo.setStyleSheet(_INPUT_STYLE)
-        self.ndi_combo.setPlaceholderText("Select or type source name…")
-        current_ndi = self.config.get("ndi_source", "")
-        if current_ndi:
-            self.ndi_combo.addItem(current_ndi)
-            self.ndi_combo.setCurrentText(current_ndi)
-        layout.addWidget(self.ndi_combo)
+        self.rtsp_edit = QLineEdit(self.config.get("rtsp_url", ""))
+        self.rtsp_edit.setMinimumWidth(260)
+        self.rtsp_edit.setPlaceholderText("rtsp://user:pass@192.168.x.x/stream1")
+        self.rtsp_edit.setStyleSheet(_INPUT_STYLE)
+        self.rtsp_edit.returnPressed.connect(self._on_connect_stream)
+        layout.addWidget(self.rtsp_edit)
 
-        self.btn_scan_ndi = QPushButton("Scan")
-        self.btn_scan_ndi.setStyleSheet(_BTN_STYLE)
-        self.btn_scan_ndi.setToolTip("Scan the network for NDI sources (~2 s)")
-        self.btn_scan_ndi.clicked.connect(self._on_scan_ndi)
-        layout.addWidget(self.btn_scan_ndi)
-
-        self.btn_connect_ndi = QPushButton("Connect NDI")
-        self.btn_connect_ndi.setStyleSheet(_BTN_STYLE)
-        self.btn_connect_ndi.clicked.connect(self._on_connect_ndi)
-        layout.addWidget(self.btn_connect_ndi)
+        self.btn_connect_stream = QPushButton("Connect Stream")
+        self.btn_connect_stream.setStyleSheet(_BTN_STYLE)
+        self.btn_connect_stream.clicked.connect(self._on_connect_stream)
+        layout.addWidget(self.btn_connect_stream)
 
         layout.addStretch()
 
@@ -321,9 +310,8 @@ class MainWindow(QMainWindow):
     # ------------------------------------------------------------------ #
 
     def _connect_signals(self):
-        self.ndi_receiver.frame_ready.connect(self._on_frame)
-        self.ndi_receiver.error_occurred.connect(self._on_ndi_error)
-        self.ndi_receiver.sources_updated.connect(self._on_sources_discovered)
+        self.rtsp_receiver.frame_ready.connect(self._on_frame)
+        self.rtsp_receiver.error_occurred.connect(self._on_stream_error)
         self.face_detector.detections_ready.connect(self._on_detections)
         self.video_widget.face_clicked.connect(self._on_face_clicked)
 
@@ -365,33 +353,9 @@ class MainWindow(QMainWindow):
             self.lbl_cam_status.setStyleSheet("color:#cc3333; font-size:14px;")
             self.lbl_cam_status.setToolTip(f"Camera unreachable: {self.config['camera_ip']}")
 
-    def _on_scan_ndi(self):
-        self.btn_scan_ndi.setEnabled(False)
-        self.btn_scan_ndi.setText("Scanning…")
-        self.status_bar.showMessage("Scanning for NDI sources (~2 s)…")
-        # Defer to keep UI responsive
-        QTimer.singleShot(100, self._do_scan_ndi)
-
-    def _do_scan_ndi(self):
-        sources = NDIReceiver.discover_sources(wait_seconds=2.0)
-        current = self.ndi_combo.currentText()
-        self.ndi_combo.clear()
-        all_sources = list(dict.fromkeys(([current] if current else []) + sources))
-        self.ndi_combo.addItems(all_sources)
-        if current:
-            idx = self.ndi_combo.findText(current)
-            if idx >= 0:
-                self.ndi_combo.setCurrentIndex(idx)
-        self.btn_scan_ndi.setEnabled(True)
-        self.btn_scan_ndi.setText("Scan")
-        if sources:
-            self.status_bar.showMessage(f"Found {len(sources)} NDI source(s): {', '.join(sources)}")
-        else:
-            self.status_bar.showMessage("No NDI sources found on this network")
-
-    def _on_connect_ndi(self):
-        source = self.ndi_combo.currentText().strip()
-        self.config["ndi_source"] = source
+    def _on_connect_stream(self):
+        url = self.rtsp_edit.text().strip()
+        self.config["rtsp_url"] = url
         self._save_config()
         self._restart_pipeline()
 
@@ -400,18 +364,18 @@ class MainWindow(QMainWindow):
     # ------------------------------------------------------------------ #
 
     def _restart_pipeline(self):
-        if self.ndi_receiver.isRunning():
-            self.ndi_receiver.stop()
+        if self.rtsp_receiver.isRunning():
+            self.rtsp_receiver.stop()
         if self.face_detector.isRunning():
             self.face_detector.stop()
 
-        self.ndi_receiver.set_source(self.config.get("ndi_source", ""))
-        self.ndi_receiver.start()
+        self.rtsp_receiver.set_url(self.config.get("rtsp_url", ""))
+        self.rtsp_receiver.start()
         self.face_detector.start()
         self.control_timer.start()
 
-        src = self.config.get("ndi_source", "") or "(first available)"
-        self.status_bar.showMessage(f"Connecting to NDI source: {src}…")
+        url = self.config.get("rtsp_url", "") or "(no URL set)"
+        self.status_bar.showMessage(f"Connecting to RTSP stream: {url}…")
 
     # ------------------------------------------------------------------ #
     # Frame / detection slots                                              #
@@ -431,20 +395,8 @@ class MainWindow(QMainWindow):
     def _on_detections(self, _frame: np.ndarray, detections: list[FaceDetection]):
         self._latest_detections = detections
 
-    def _on_sources_discovered(self, sources: list[str]):
-        if not sources:
-            return
-        current = self.ndi_combo.currentText()
-        existing = [self.ndi_combo.itemText(i) for i in range(self.ndi_combo.count())]
-        for s in sources:
-            if s not in existing:
-                self.ndi_combo.addItem(s)
-        # Auto-select if nothing chosen yet
-        if not current and sources:
-            self.ndi_combo.setCurrentText(sources[0])
-
-    def _on_ndi_error(self, msg: str):
-        self.status_bar.showMessage(f"NDI error: {msg}")
+    def _on_stream_error(self, msg: str):
+        self.status_bar.showMessage(f"Stream error: {msg}")
 
     # ------------------------------------------------------------------ #
     # Lock / unlock                                                        #
@@ -508,16 +460,13 @@ class MainWindow(QMainWindow):
     # ------------------------------------------------------------------ #
 
     def _on_settings(self):
-        dlg = SettingsDialog(self.config, ndi_sources=[], parent=self)
+        dlg = SettingsDialog(self.config, parent=self)
         if dlg.exec() == SettingsDialog.DialogCode.Accepted:
             self.config.update(dlg.get_config())
             self._save_config()
             # Sync toolbar fields back from config
             self.ip_edit.setText(self.config["camera_ip"])
-            src = self.config.get("ndi_source", "")
-            if src and self.ndi_combo.findText(src) < 0:
-                self.ndi_combo.insertItem(0, src)
-            self.ndi_combo.setCurrentText(src)
+            self.rtsp_edit.setText(self.config.get("rtsp_url", ""))
             # Apply
             self.camera = CanonCamera(
                 ip=self.config["camera_ip"],
@@ -537,7 +486,7 @@ class MainWindow(QMainWindow):
         self.control_timer.stop()
         self.ping_timer.stop()
         self.camera.stop()
-        self.ndi_receiver.stop()
+        self.rtsp_receiver.stop()
         self.face_detector.stop()
         event.accept()
 

@@ -44,8 +44,6 @@ a = Analysis(
         # Networking
         "requests",
         "urllib3",
-        # NDI (optional — app handles ImportError gracefully)
-        "ndi",
     ],
     hookspath=[],
     hooksconfig={},
@@ -105,7 +103,7 @@ app = BUNDLE(
         "CFBundleShortVersionString":  "0.1.4",
         "CFBundleVersion":             "0.1.4",
         "NSHighResolutionCapable":     True,
-        "NSCameraUsageDescription":    "Camera access is not used directly — video is received via NDI.",
+        "NSCameraUsageDescription":    "Camera access is not used directly — video is received via RTSP.",
         "NSMicrophoneUsageDescription":"Microphone access is not used.",
         "LSMinimumSystemVersion":      "12.0",
         "NSRequiresAquaSystemAppearance": False,  # supports Dark Mode

@@ -1,16 +1,13 @@
-"""Settings dialog — camera connection, NDI source, tracking parameters."""
+"""Settings dialog — camera connection, RTSP stream, tracking parameters."""
 
 from PyQt6.QtWidgets import (
-    QComboBox,
     QDialog,
     QDialogButtonBox,
     QDoubleSpinBox,
     QFormLayout,
     QGroupBox,
-    QHBoxLayout,
     QLabel,
     QLineEdit,
-    QPushButton,
     QSpinBox,
     QVBoxLayout,
 )
@@ -18,14 +15,14 @@ from PyQt6.QtCore import Qt
 
 
 class SettingsDialog(QDialog):
-    def __init__(self, config: dict, ndi_sources: list[str], parent=None):
+    def __init__(self, config: dict, parent=None):
         super().__init__(parent)
         self.setWindowTitle("Settings")
-        self.setMinimumWidth(420)
+        self.setMinimumWidth(440)
         self.setWindowModality(Qt.WindowModality.ApplicationModal)
-        self._build_ui(config, ndi_sources)
+        self._build_ui(config)
 
-    def _build_ui(self, config: dict, ndi_sources: list[str]):
+    def _build_ui(self, config: dict):
         layout = QVBoxLayout(self)
         layout.setSpacing(12)
 
@@ -44,36 +41,20 @@ class SettingsDialog(QDialog):
         cam_form.addRow("Password:", self.pass_edit)
         layout.addWidget(cam_group)
 
-        # ---- NDI -------------------------------------------------------- #
-        ndi_group = QGroupBox("NDI Source")
-        ndi_layout = QVBoxLayout(ndi_group)
+        # ---- RTSP ------------------------------------------------------- #
+        rtsp_group = QGroupBox("Video Stream (RTSP)")
+        rtsp_form = QFormLayout(rtsp_group)
 
-        self.ndi_combo = QComboBox()
-        self.ndi_combo.setEditable(True)
-        self.ndi_combo.setInsertPolicy(QComboBox.InsertPolicy.InsertAtTop)
+        self.rtsp_edit = QLineEdit(config.get("rtsp_url", ""))
+        self.rtsp_edit.setPlaceholderText("rtsp://user:pass@192.168.x.x/stream1")
 
-        current = config.get("ndi_source", "")
-        all_sources = list(dict.fromkeys([current] + ndi_sources)) if current else ndi_sources
-        self.ndi_combo.addItems(all_sources)
-        if current:
-            idx = self.ndi_combo.findText(current)
-            if idx >= 0:
-                self.ndi_combo.setCurrentIndex(idx)
+        rtsp_hint = QLabel("Enter the full RTSP URL for your camera's stream.")
+        rtsp_hint.setStyleSheet("color: #888; font-size: 11px;")
+        rtsp_hint.setWordWrap(True)
 
-        refresh_btn = QPushButton("Refresh Sources")
-        refresh_btn.setToolTip("Scan the network for NDI sources (takes ~2 s)")
-        refresh_btn.clicked.connect(self._refresh_ndi)
-
-        ndi_row = QHBoxLayout()
-        ndi_row.addWidget(self.ndi_combo, stretch=1)
-        ndi_row.addWidget(refresh_btn)
-
-        self._ndi_status = QLabel("")
-        self._ndi_status.setStyleSheet("color: #888; font-size: 11px;")
-
-        ndi_layout.addLayout(ndi_row)
-        ndi_layout.addWidget(self._ndi_status)
-        layout.addWidget(ndi_group)
+        rtsp_form.addRow("RTSP URL:", self.rtsp_edit)
+        rtsp_form.addRow("", rtsp_hint)
+        layout.addWidget(rtsp_group)
 
         # ---- Tracking --------------------------------------------------- #
         track_group = QGroupBox("Tracking")
@@ -120,32 +101,12 @@ class SettingsDialog(QDialog):
         buttons.rejected.connect(self.reject)
         layout.addWidget(buttons)
 
-    def _refresh_ndi(self):
-        self._ndi_status.setText("Scanning… (2 s)")
-        self._ndi_status.repaint()
-
-        from ..ndi_receiver import NDIReceiver
-        sources = NDIReceiver.discover_sources(wait_seconds=2.0)
-
-        current = self.ndi_combo.currentText()
-        self.ndi_combo.clear()
-        all_sources = list(dict.fromkeys([current] + sources)) if current else sources
-        self.ndi_combo.addItems(all_sources)
-        idx = self.ndi_combo.findText(current)
-        if idx >= 0:
-            self.ndi_combo.setCurrentIndex(idx)
-
-        if sources:
-            self._ndi_status.setText(f"Found {len(sources)} source(s)")
-        else:
-            self._ndi_status.setText("No NDI sources found on this network")
-
     def get_config(self) -> dict:
         return {
             "camera_ip":            self.ip_edit.text().strip(),
             "camera_user":          self.user_edit.text().strip(),
             "camera_pass":          self.pass_edit.text(),
-            "ndi_source":           self.ndi_combo.currentText().strip(),
+            "rtsp_url":             self.rtsp_edit.text().strip(),
             "deadzone":             self.deadzone_spin.value(),
             "max_speed":            self.max_speed_spin.value(),
             "detection_confidence": self.confidence_spin.value(),

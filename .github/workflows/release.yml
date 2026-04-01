@@ -11,10 +11,16 @@ permissions:
 
 jobs:
   build-macos:
-    name: Build DMG (arm64)
-    # macos-14 = Apple Silicon (arm64). GitHub no longer offers free Intel runners.
-    # Intel Mac users can run the arm64 build transparently via Rosetta 2.
-    runs-on: macos-14
+    name: Build DMG (${{ matrix.arch }})
+    runs-on: ${{ matrix.runner }}
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - runner: macos-14   # Apple Silicon
+            arch: arm64
+          - runner: macos-13   # Intel
+            arch: x86_64
 
     steps:
       # ------------------------------------------------------------------ #
@@ -33,54 +39,22 @@ jobs:
           cache: pip
 
       # ------------------------------------------------------------------ #
-      # 3. NDI SDK                                                           #
-      #    ndi-python builds from source and requires the NDI SDK headers.  #
-      #    We download and install the official Apple pkg silently.         #
-      # ------------------------------------------------------------------ #
-      - name: Install NDI SDK
-        run: |
-          curl -fsSL \
-            "https://downloads.ndi.tv/SDK/NDI_SDK_Mac/Install_NDI_SDK_v5_Apple.pkg" \
-            -o /tmp/ndi_sdk.pkg
-          sudo installer -pkg /tmp/ndi_sdk.pkg -target /
-          # NDI SDK installs to /Library/NDI SDK for Apple — verify
-          ls "/Library/NDI SDK for Apple/" || true
-
-      # ------------------------------------------------------------------ #
-      # 4. ndi-python from source                                            #
-      #    The PyPI tarball omits the pybind11 git submodule, so we clone   #
-      #    the repo with --recurse-submodules and build from source.        #
-      # ------------------------------------------------------------------ #
-      - name: Install ndi-python from source
-        run: |
-          git clone --recurse-submodules \
-            https://github.com/buresu/ndi-python.git /tmp/ndi-python
-          # The pinned pybind11 submodule is too old for modern CMake (< 3.5).
-          # Update it to a recent stable tag before building.
-          cd /tmp/ndi-python/lib/pybind11
-          git fetch --tags
-          git checkout v2.13.6
-          cd /tmp/ndi-python
-          pip install .
-
-      # ------------------------------------------------------------------ #
-      # 5. Remaining Python dependencies                                     #
+      # 3. Python dependencies                                               #
       # ------------------------------------------------------------------ #
       - name: Install Python dependencies
         run: |
           python -m pip install --upgrade pip
-          # Install everything except ndi-python (already built above)
-          grep -iv "ndi-python" requirements.txt | pip install -r /dev/stdin
+          pip install -r requirements.txt
           pip install pyinstaller pillow
 
       # ------------------------------------------------------------------ #
-      # 5. Generate app icon                                                 #
+      # 4. Generate app icon                                                 #
       # ------------------------------------------------------------------ #
       - name: Generate AppIcon.icns
         run: python assets/generate_icon.py
 
       # ------------------------------------------------------------------ #
-      # 6. Build .app bundle with PyInstaller                               #
+      # 5. Build .app bundle with PyInstaller                               #
       # ------------------------------------------------------------------ #
       - name: Build app bundle
         run: |
@@ -89,7 +63,7 @@ jobs:
           ls -lh dist/
 
       # ------------------------------------------------------------------ #
-      # 7. Ad-hoc code signing                                              #
+      # 6. Ad-hoc code signing                                              #
       #    Lets users right-click → Open on first launch without needing   #
       #    a paid Developer ID certificate.                                 #
       #                                                                      #
@@ -118,7 +92,7 @@ jobs:
           codesign --verify --verbose dist/BetterFaceTracking.app
 
       # ------------------------------------------------------------------ #
-      # 8. Create DMG                                                        #
+      # 7. Create DMG                                                        #
       # ------------------------------------------------------------------ #
       - name: Install create-dmg
         run: brew install create-dmg
@@ -127,7 +101,7 @@ jobs:
         env:
           TAG: ${{ github.ref_name }}
         run: |
-          DMG_NAME="BetterFaceTracking-${TAG}-arm64.dmg"
+          DMG_NAME="BetterFaceTracking-${TAG}-${{ matrix.arch }}.dmg"
 
           create-dmg \
             --volname "Better Face Tracking ${TAG}" \
@@ -147,7 +121,7 @@ jobs:
           ls -lh "${DMG_NAME}"
 
       # ------------------------------------------------------------------ #
-      # 9. Upload artifact (available even if release step fails)           #
+      # 8. Upload artifact (available even if release step fails)           #
       # ------------------------------------------------------------------ #
       - name: Upload DMG artifact
         uses: actions/upload-artifact@v4
@@ -157,7 +131,7 @@ jobs:
           retention-days: 30
 
       # ------------------------------------------------------------------ #
-      # 10. Attach to GitHub Release                                         #
+      # 9. Attach to GitHub Release                                          #
       # ------------------------------------------------------------------ #
       - name: Publish to GitHub Release
         uses: softprops/action-gh-release@v2
@@ -169,12 +143,15 @@ jobs:
           body: |
             ## Installation
 
-            1. Download **`BetterFaceTracking-${{ github.ref_name }}-arm64.dmg`**
+            | Mac | Download |
+            |-----|----------|
+            | Apple Silicon (M1/M2/M3/M4) | `BetterFaceTracking-${{ github.ref_name }}-arm64.dmg` |
+            | Intel | `BetterFaceTracking-${{ github.ref_name }}-x86_64.dmg` |
+
+            1. Download the DMG for your Mac.
             2. Open the DMG and drag **BetterFaceTracking** to Applications.
             3. **First launch:** right-click the app → **Open** (required once — app is ad-hoc signed, not notarized yet).
-            4. Intel Mac users: the arm64 build runs transparently via **Rosetta 2**.
 
             ## Requirements
             - macOS 12 (Monterey) or later
-            - [NDI Runtime](https://ndi.video/download-ndi-sdk/) installed for NDI video input
-            - Canon CR-N series PTZ camera on the same network
+            - Canon CR-N series PTZ camera on the same network (RTSP must be enabled in camera settings)

@@ -5,9 +5,6 @@ Entry point.
 
 Requirements:
   pip install -r requirements.txt
-
-  NDI SDK must also be installed separately:
-  https://ndi.video/download-ndi-sdk/
 """
 
 import logging

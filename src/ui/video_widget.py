@@ -1,5 +1,5 @@
 """
-VideoWidget — displays the live NDI frame with face-detection overlays.
+VideoWidget — displays the live video frame with face-detection overlays.
 
   • All detected faces get a thin white bounding box.
   • The locked/tracked face gets a bright green box + corner ticks + crosshair.
@@ -76,7 +76,7 @@ class VideoWidget(QWidget):
             painter.setPen(QColor("#444"))
             painter.setFont(QFont("Arial", 14))
             painter.drawText(0, 0, W, H, Qt.AlignmentFlag.AlignCenter,
-                             "No video\n\nConnect an NDI source in Settings")
+                             "No video\n\nEnter an RTSP URL and click Connect Stream")
             painter.end()
             return
 
